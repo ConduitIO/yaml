@@ -99,7 +99,10 @@ func (p *parser) peek() yaml_event_type_t {
 	if p.event.typ != yaml_NO_EVENT {
 		return p.event.typ
 	}
-	if !yaml_parser_parse(&p.parser, &p.event) {
+	// It's curious choice from the underlying API to generally return a
+	// positive result on success, but on this case return true in an error
+	// scenario. This was the source of bugs in the past (issue #666).
+	if !yaml_parser_parse(&p.parser, &p.event) || p.parser.error != yaml_NO_ERROR {
 		p.fail()
 	}
 	return p.event.typ
@@ -315,6 +318,8 @@ type decoder struct {
 	decodeCount int
 	aliasCount  int
 	aliasDepth  int
+
+	mergedFields map[interface{}]bool
 }
 
 var (
@@ -795,6 +800,11 @@ func (d *decoder) mapping(n *Node, out reflect.Value) (good bool) {
 		}
 	}
 
+	mergedFields := d.mergedFields
+	d.mergedFields = nil
+
+	var mergeNode *Node
+
 	mapIsNew := false
 	if out.IsNil() {
 		out.Set(reflect.MakeMap(outt))
@@ -802,11 +812,18 @@ func (d *decoder) mapping(n *Node, out reflect.Value) (good bool) {
 	}
 	for i := 0; i < l; i += 2 {
 		if isMerge(n.Content[i]) {
-			d.merge(n.Content[i+1], out)
+			mergeNode = n.Content[i+1]
 			continue
 		}
 		k := reflect.New(kt).Elem()
 		if d.unmarshal(n.Content[i], k) {
+			if mergedFields != nil {
+				ki := k.Interface()
+				if mergedFields[ki] {
+					continue
+				}
+				mergedFields[ki] = true
+			}
 			kkind := k.Kind()
 			if kkind == reflect.Interface {
 				kkind = k.Elem().Kind()
@@ -820,6 +837,12 @@ func (d *decoder) mapping(n *Node, out reflect.Value) (good bool) {
 			}
 		}
 	}
+
+	d.mergedFields = mergedFields
+	if mergeNode != nil {
+		d.merge(n, mergeNode, out)
+	}
+
 	d.stringMapType = stringMapType
 	d.generalMapType = generalMapType
 	return true
@@ -831,7 +854,8 @@ func isStringMap(n *Node) bool {
 	}
 	l := len(n.Content)
 	for i := 0; i < l; i += 2 {
-		if n.Content[i].ShortTag() != strTag {
+		shortTag := n.Content[i].ShortTag()
+		if shortTag != strTag && shortTag != mergeTag {
 			return false
 		}
 	}
@@ -848,7 +872,6 @@ func (d *decoder) mappingStruct(n *Node, out reflect.Value) (good bool) {
 	var elemType reflect.Type
 	if sinfo.InlineMap != -1 {
 		inlineMap = out.Field(sinfo.InlineMap)
-		inlineMap.Set(reflect.New(inlineMap.Type()).Elem())
 		elemType = inlineMap.Type().Elem()
 	}
 
@@ -857,6 +880,9 @@ func (d *decoder) mappingStruct(n *Node, out reflect.Value) (good bool) {
 		d.prepare(n, field)
 	}
 
+	mergedFields := d.mergedFields
+	d.mergedFields = nil
+	var mergeNode *Node
 	var doneFields []bool
 	if d.uniqueKeys {
 		doneFields = make([]bool, len(sinfo.FieldsList))
@@ -866,13 +892,20 @@ func (d *decoder) mappingStruct(n *Node, out reflect.Value) (good bool) {
 	for i := 0; i < l; i += 2 {
 		ni := n.Content[i]
 		if isMerge(ni) {
-			d.merge(n.Content[i+1], out)
+			mergeNode = n.Content[i+1]
 			continue
 		}
 		if !d.unmarshal(ni, name) {
 			continue
 		}
-		if info, ok := sinfo.FieldsMap[name.String()]; ok {
+		sname := name.String()
+		if mergedFields != nil {
+			if mergedFields[sname] {
+				continue
+			}
+			mergedFields[sname] = true
+		}
+		if info, ok := sinfo.FieldsMap[sname]; ok {
 			if d.uniqueKeys {
 				if doneFields[info.Id] {
 					d.terrors = append(d.terrors, NewFieldAlreadySetError(ni.Line, ni.Column, name.String(), out.Type()))
@@ -898,6 +931,11 @@ func (d *decoder) mappingStruct(n *Node, out reflect.Value) (good bool) {
 			d.terrors = append(d.terrors, NewUnknownFieldError(ni.Line, ni.Column, name.String(), out.Type()))
 		}
 	}
+
+	d.mergedFields = mergedFields
+	if mergeNode != nil {
+		d.merge(n, mergeNode, out)
+	}
 	return true
 }
 
@@ -905,19 +943,29 @@ func failWantMap() {
 	failf("map merge requires map or sequence of maps as the value")
 }
 
-func (d *decoder) merge(n *Node, out reflect.Value) {
-	switch n.Kind {
+func (d *decoder) merge(parent *Node, merge *Node, out reflect.Value) {
+	mergedFields := d.mergedFields
+	if mergedFields == nil {
+		d.mergedFields = make(map[interface{}]bool)
+		for i := 0; i < len(parent.Content); i += 2 {
+			k := reflect.New(ifaceType).Elem()
+			if d.unmarshal(parent.Content[i], k) {
+				d.mergedFields[k.Interface()] = true
+			}
+		}
+	}
+
+	switch merge.Kind {
 	case MappingNode:
-		d.unmarshal(n, out)
+		d.unmarshal(merge, out)
 	case AliasNode:
-		if n.Alias != nil && n.Alias.Kind != MappingNode {
+		if merge.Alias != nil && merge.Alias.Kind != MappingNode {
 			failWantMap()
 		}
-		d.unmarshal(n, out)
+		d.unmarshal(merge, out)
 	case SequenceNode:
-		// Step backwards as earlier nodes take precedence.
-		for i := len(n.Content) - 1; i >= 0; i-- {
-			ni := n.Content[i]
+		for i := 0; i < len(merge.Content); i++ {
+			ni := merge.Content[i]
 			if ni.Kind == AliasNode {
 				if ni.Alias != nil && ni.Alias.Kind != MappingNode {
 					failWantMap()
@@ -930,6 +978,8 @@ func (d *decoder) merge(n *Node, out reflect.Value) {
 	default:
 		failWantMap()
 	}
+
+	d.mergedFields = mergedFields
 }
 
 func isMerge(n *Node) bool {
