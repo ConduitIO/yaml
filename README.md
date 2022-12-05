@@ -1,5 +1,11 @@
 # YAML support for the Go language
 
+> **Note**
+> 
+> This is a fork of [gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)
+> which provides more specific error types when using `Unmarshal` to decode
+> documents (see [example](#example-error-types)).
+
 Introduction
 ------------
 
@@ -45,9 +51,9 @@ To install it, run:
 API documentation
 -----------------
 
-If opened in a browser, the import path itself leads to the API documentation:
+API documentation is hosted on pkg.go.dev:
 
-  - [https://github.com/conduitio/yaml](https://github.com/conduitio/yaml)
+  - [https://pkg.go.dev/github.com/conduitio/yaml](https://pkg.go.dev/github.com/conduitio/yaml)
 
 API stability
 -------------
@@ -62,8 +68,8 @@ The yaml package is licensed under the MIT and Apache License 2.0 licenses.
 Please see the LICENSE file for details.
 
 
-Example
--------
+Example (basic)
+---------------
 
 ```Go
 package main
@@ -148,3 +154,73 @@ b:
   - 4
 ```
 
+Example (error types)
+---------------------
+
+```Go
+package main
+
+import (
+	"fmt"
+
+	"github.com/conduitio/yaml"
+)
+
+
+var data = `
+a: Easy!
+b:
+  c: abc   # expected int
+  d: [3, 4]
+foo: unknown
+bar:
+  Duplicate: first
+  Duplicate: again
+`
+
+type T struct {
+	A string
+	B struct {
+		RenamedC int   `yaml:"c"`
+		D        []int `yaml:",flow"`
+	}
+	Bar struct {
+		Duplicate string
+	}
+}
+
+func main() {
+	var t T
+
+	dec := yaml.NewDecoder(bytes.NewBufferString(data))
+	dec.KnownFields(true) // enable *yaml.UnknownFieldError
+
+	err := dec.Decode(&t)
+	if err != nil {
+		fmt.Println("oops, something went wrong")
+		if terr, ok := err.(*yaml.TypeError); ok {
+			for _,unmarshalErr := range terr.Errors {
+				fmt.Printf("  %T: line %d col %d: %v\n", unmarshalErr, unmarshalErr.Line(), unmarshalErr.Column(), unmarshalErr.Error())
+			}
+		}
+	}
+	d, _ := yaml.Marshal(&t)
+	fmt.Printf("--- t dump:\n%s\n\n", string(d))
+}
+```
+
+Produces:
+
+```
+oops, something went wrong
+  *yaml.InvalidTypeError: line 4 col 6: cannot unmarshal !!str `abc` into int
+  *yaml.UnknownFieldError: line 6 col 1: field foo not found in type yaml_test.T
+  *yaml.DuplicateMappingKeyError: line 9 col 3: mapping key "Duplicate" already defined at line 8
+--- t dump:
+a: Easy!
+b:
+    c: 0
+    d: [3, 4]
+bar:
+    duplicate: ""
+```
