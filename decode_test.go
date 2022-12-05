@@ -26,7 +26,7 @@ import (
 	"time"
 
 	. "gopkg.in/check.v1"
-	"gopkg.in/yaml.v3"
+	"github.com/conduitio/yaml"
 )
 
 var unmarshalIntTest = 123
@@ -980,6 +980,18 @@ func (s *S) TestDecoderErrors(c *C) {
 	}
 }
 
+func (s *S) TestParserError(c *C) {
+	var v struct {
+		A, B int
+	}
+	data := "a: 1\n=\nb: 2"
+	err := yaml.Unmarshal([]byte(data), &v)
+	c.Assert(err, DeepEquals, &yaml.ParserError{
+		Message: "could not find expected ':'",
+		Line:    2,
+	})
+}
+
 var unmarshalerTests = []struct {
 	data, tag string
 	value     interface{}
@@ -1112,8 +1124,8 @@ func (s *S) TestUnmarshalerWholeDocument(c *C) {
 }
 
 func (s *S) TestUnmarshalerTypeError(c *C) {
-	unmarshalerResult[2] = &yaml.TypeError{[]string{"foo"}}
-	unmarshalerResult[4] = &yaml.TypeError{[]string{"bar"}}
+	unmarshalerResult[2] = &yaml.TypeError{[]yaml.UnmarshalError{yaml.NewInvalidTypeError(1, 2, "foo", "bar", reflect.TypeOf(0))}}
+	unmarshalerResult[4] = &yaml.TypeError{[]yaml.UnmarshalError{yaml.NewInvalidTypeError(1, 2, "bar", "baz", reflect.TypeOf(true))}}
 	defer func() {
 		delete(unmarshalerResult, 2)
 		delete(unmarshalerResult, 4)
@@ -1130,8 +1142,8 @@ func (s *S) TestUnmarshalerTypeError(c *C) {
 	c.Assert(err, ErrorMatches, ""+
 		"yaml: unmarshal errors:\n"+
 		"  line 1: cannot unmarshal !!str `A` into int\n"+
-		"  foo\n"+
-		"  bar\n"+
+		"  line 1: cannot unmarshal foo `bar` into int\n"+
+		"  line 1: cannot unmarshal bar `baz` into bool\n"+
 		"  line 1: cannot unmarshal !!str `B` into int")
 	c.Assert(v.M["abc"], NotNil)
 	c.Assert(v.M["def"], IsNil)
@@ -1143,8 +1155,8 @@ func (s *S) TestUnmarshalerTypeError(c *C) {
 }
 
 func (s *S) TestObsoleteUnmarshalerTypeError(c *C) {
-	unmarshalerResult[2] = &yaml.TypeError{[]string{"foo"}}
-	unmarshalerResult[4] = &yaml.TypeError{[]string{"bar"}}
+	unmarshalerResult[2] = &yaml.TypeError{[]yaml.UnmarshalError{yaml.NewInvalidTypeError(1, 2, "foo", "bar", reflect.TypeOf(0))}}
+	unmarshalerResult[4] = &yaml.TypeError{[]yaml.UnmarshalError{yaml.NewInvalidTypeError(1, 2, "bar", "baz", reflect.TypeOf(true))}}
 	defer func() {
 		delete(unmarshalerResult, 2)
 		delete(unmarshalerResult, 4)
@@ -1161,8 +1173,8 @@ func (s *S) TestObsoleteUnmarshalerTypeError(c *C) {
 	c.Assert(err, ErrorMatches, ""+
 		"yaml: unmarshal errors:\n"+
 		"  line 1: cannot unmarshal !!str `A` into int\n"+
-		"  foo\n"+
-		"  bar\n"+
+		"  line 1: cannot unmarshal foo `bar` into int\n"+
+		"  line 1: cannot unmarshal bar `baz` into bool\n"+
 		"  line 1: cannot unmarshal !!str `B` into int")
 	c.Assert(v.M["abc"], NotNil)
 	c.Assert(v.M["def"], IsNil)
