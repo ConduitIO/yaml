@@ -27,7 +27,7 @@ import (
 	"os"
 
 	. "gopkg.in/check.v1"
-	"github.com/conduitio/yaml"
+	"github.com/conduitio/yaml/v3"
 )
 
 var marshalIntTest = 123

@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/conduitio/yaml"
+	"github.com/conduitio/yaml/v3"
 )
 
 // An example showing how to unmarshal embedded
