@@ -42,11 +42,11 @@ supported since they're a poor design and are gone in YAML 1.2.
 Installation and usage
 ----------------------
 
-The import path for the package is *github.com/conduitio/yaml*.
+The import path for the package is *github.com/conduitio/yaml/v3*.
 
 To install it, run:
 
-    go get github.com/conduitio/yaml
+    go get github.com/conduitio/yaml/v3
 
 API documentation
 -----------------
@@ -78,7 +78,7 @@ import (
         "fmt"
         "log"
 
-        "github.com/conduitio/yaml"
+        "github.com/conduitio/yaml/v3"
 )
 
 var data = `
@@ -163,7 +163,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/conduitio/yaml"
+	"github.com/conduitio/yaml/v3"
 )
 
 

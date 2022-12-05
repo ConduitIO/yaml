@@ -1,4 +1,4 @@
-module github.com/conduitio/yaml
+module github.com/conduitio/yaml/v3
 
 go 1.11
 
