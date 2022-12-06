@@ -22,6 +22,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"strconv"
 	"time"
 )
 
@@ -35,6 +36,9 @@ type parser struct {
 	anchors  map[string]*Node
 	doneInit bool
 	textless bool
+
+	hook     DecoderHook
+	hookPath []string
 }
 
 func newParser(b []byte) *parser {
@@ -58,12 +62,17 @@ func newParserFromReader(r io.Reader) *parser {
 	return &p
 }
 
+func (p *parser) withHook(h DecoderHook) {
+	p.hook = h
+}
+
 func (p *parser) init() {
 	if p.doneInit {
 		return
 	}
 	p.anchors = make(map[string]*Node)
 	p.expect(yaml_STREAM_START_EVENT)
+	p.hookPath = make([]string, 0)
 	p.doneInit = true
 }
 
@@ -139,19 +148,23 @@ func (p *parser) anchor(n *Node, anchor []byte) {
 	}
 }
 
-func (p *parser) parse() *Node {
+func (p *parser) parse(triggerHook bool) *Node {
 	p.init()
+	var n *Node
 	switch p.peek() {
 	case yaml_SCALAR_EVENT:
-		return p.scalar()
+		n = p.scalar()
 	case yaml_ALIAS_EVENT:
-		return p.alias()
+		n = p.alias()
 	case yaml_MAPPING_START_EVENT:
-		return p.mapping()
+		triggerHook = false // maps are not leaf nodes, skip hook
+		n = p.mapping()
 	case yaml_SEQUENCE_START_EVENT:
-		return p.sequence()
+		triggerHook = false // sequences are not leaf nodes, skip hook
+		n = p.sequence()
 	case yaml_DOCUMENT_START_EVENT:
-		return p.document()
+		triggerHook = false // documents are not leaf nodes, skip hook
+		n =  p.document()
 	case yaml_STREAM_END_EVENT:
 		// Happens when attempting to decode an empty buffer.
 		return nil
@@ -160,6 +173,11 @@ func (p *parser) parse() *Node {
 	default:
 		panic("internal error: attempted to parse unknown event (please report): " + p.event.typ.String())
 	}
+
+	if triggerHook && p.hook != nil {
+		p.hook(p.hookPath, n)
+	}
+	return n
 }
 
 func (p *parser) node(kind Kind, defaultTag, tag, value string) *Node {
@@ -188,8 +206,8 @@ func (p *parser) node(kind Kind, defaultTag, tag, value string) *Node {
 	return n
 }
 
-func (p *parser) parseChild(parent *Node) *Node {
-	child := p.parse()
+func (p *parser) parseChild(parent *Node, hook bool) *Node {
+	child := p.parse(hook)
 	parent.Content = append(parent.Content, child)
 	return child
 }
@@ -198,7 +216,7 @@ func (p *parser) document() *Node {
 	n := p.node(DocumentNode, "", "", "")
 	p.doc = n
 	p.expect(yaml_DOCUMENT_START_EVENT)
-	p.parseChild(n)
+	p.parseChild(n, false)
 	if p.peek() == yaml_DOCUMENT_END_EVENT {
 		n.FootComment = string(p.event.foot_comment)
 	}
@@ -254,7 +272,9 @@ func (p *parser) sequence() *Node {
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_SEQUENCE_START_EVENT)
 	for p.peek() != yaml_SEQUENCE_END_EVENT {
-		p.parseChild(n)
+		p.hookPath = append(p.hookPath, strconv.Itoa(len(n.Content)))
+		p.parseChild(n, true)
+		p.hookPath = p.hookPath[:len(p.hookPath)-1]
 	}
 	n.LineComment = string(p.event.line_comment)
 	n.FootComment = string(p.event.foot_comment)
@@ -272,7 +292,8 @@ func (p *parser) mapping() *Node {
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_MAPPING_START_EVENT)
 	for p.peek() != yaml_MAPPING_END_EVENT {
-		k := p.parseChild(n)
+		k := p.parseChild(n, false)
+		p.hookPath = append(p.hookPath, k.Value)
 		if block && k.FootComment != "" {
 			// Must be a foot comment for the prior value when being dedented.
 			if len(n.Content) > 2 {
@@ -280,7 +301,7 @@ func (p *parser) mapping() *Node {
 				k.FootComment = ""
 			}
 		}
-		v := p.parseChild(n)
+		v := p.parseChild(n, true)
 		if k.FootComment == "" && v.FootComment != "" {
 			k.FootComment = v.FootComment
 			v.FootComment = ""
@@ -291,6 +312,7 @@ func (p *parser) mapping() *Node {
 			}
 			p.expect(yaml_TAIL_COMMENT_EVENT)
 		}
+		p.hookPath = p.hookPath[:len(p.hookPath)-1]
 	}
 	n.LineComment = string(p.event.line_comment)
 	n.FootComment = string(p.event.foot_comment)

@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	. "gopkg.in/check.v1"
 	"github.com/conduitio/yaml/v3"
+	. "gopkg.in/check.v1"
 )
 
 var unmarshalIntTest = 123
@@ -1712,6 +1712,58 @@ func (s *S) TestUnmarshalKnownFields(c *C) {
 		dec.KnownFields(item.known)
 		err := dec.Decode(value.Interface())
 		c.Assert(err, ErrorMatches, item.error)
+	}
+}
+
+func (s *S) TestDecoderHook(c *C) {
+	y := `
+a:
+  b: foo
+  c:
+    d:
+      e: bar
+f:
+  g:
+    h:
+      i:
+        - 1
+        - 2
+j: {"k": true, "l": false}
+
+x:
+  - z: yes
+    y: no
+  - z: up
+    w: down
+`
+	got := make(map[string]*yaml.Node)
+
+	dec := yaml.NewDecoder(bytes.NewBufferString(y))
+	dec.WithHook(func(path []string, node *yaml.Node) {
+		joinedPath := strings.Join(path, ".")
+		if _, ok := got[joinedPath]; ok {
+			c.Fatalf("got path twice: %v", joinedPath)
+		}
+		got[joinedPath] = node
+	})
+	err := dec.Decode(map[string]interface{}{})
+	c.Assert(err, IsNil)
+
+	want := map[string]string{
+		"a.b": "foo",
+		"a.c.d.e": "bar",
+		"f.g.h.i.0": "1",
+		"f.g.h.i.1": "2",
+		"j.k": "true",
+		"j.l": "false",
+		"x.0.z": "yes",
+		"x.0.y": "no",
+		"x.1.z": "up",
+		"x.1.w": "down",
+	}
+	c.Assert(len(got), Equals, len(want))
+	for k,v := range want {
+		c.Assert(got[k].Value, Equals, v)
 	}
 }
 
