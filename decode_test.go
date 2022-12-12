@@ -1763,7 +1763,10 @@ x:
 	}
 	c.Assert(len(got), Equals, len(want))
 	for k,v := range want {
-		c.Assert(got[k].Value, Equals, v)
+		comment := Commentf("key: %s", k)
+		node, ok := got[k]
+		c.Assert(ok, Equals, true, comment)
+		c.Assert(node.Value, Equals, v, comment)
 	}
 }
 
