@@ -87,7 +87,22 @@ type Marshaler interface {
 // supported tag options.
 //
 func Unmarshal(in []byte, out interface{}) (err error) {
-	return unmarshal(in, out, false)
+	defer handleErr(&err)
+	d := newDecoder()
+	p := newParser(in)
+	defer p.destroy()
+	node := p.parse(false)
+	if node != nil {
+		v := reflect.ValueOf(out)
+		if v.Kind() == reflect.Ptr && !v.IsNil() {
+			v = v.Elem()
+		}
+		d.unmarshal(node, v)
+	}
+	if len(d.terrors) > 0 {
+		return &TypeError{d.terrors}
+	}
+	return nil
 }
 
 // A Decoder reads and decodes YAML values from an input stream.
@@ -112,6 +127,15 @@ func (dec *Decoder) KnownFields(enable bool) {
 	dec.knownFields = enable
 }
 
+// DecoderHook is called for every leaf node and receives the node itself and
+// the path leading up to the node.
+type DecoderHook func(path []string, node *Node)
+
+// WithHook adds a DecoderHook that gets called for every leaf node.
+func (dec *Decoder) WithHook(h DecoderHook) {
+	dec.parser.withHook(h)
+}
+
 // Decode reads the next YAML-encoded value from its input
 // and stores it in the value pointed to by v.
 //
@@ -121,7 +145,7 @@ func (dec *Decoder) Decode(v interface{}) (err error) {
 	d := newDecoder()
 	d.knownFields = dec.knownFields
 	defer handleErr(&err)
-	node := dec.parser.parse()
+	node := dec.parser.parse(false)
 	if node == nil {
 		return io.EOF
 	}
@@ -148,25 +172,6 @@ func (n *Node) Decode(v interface{}) (err error) {
 		out = out.Elem()
 	}
 	d.unmarshal(n, out)
-	if len(d.terrors) > 0 {
-		return &TypeError{d.terrors}
-	}
-	return nil
-}
-
-func unmarshal(in []byte, out interface{}, strict bool) (err error) {
-	defer handleErr(&err)
-	d := newDecoder()
-	p := newParser(in)
-	defer p.destroy()
-	node := p.parse()
-	if node != nil {
-		v := reflect.ValueOf(out)
-		if v.Kind() == reflect.Ptr && !v.IsNil() {
-			v = v.Elem()
-		}
-		d.unmarshal(node, v)
-	}
 	if len(d.terrors) > 0 {
 		return &TypeError{d.terrors}
 	}
@@ -266,7 +271,7 @@ func (n *Node) Encode(v interface{}) (err error) {
 	p := newParser(e.out)
 	p.textless = true
 	defer p.destroy()
-	doc := p.parse()
+	doc := p.parse(false)
 	*n = *doc.Content[0]
 	return nil
 }
@@ -517,9 +522,9 @@ const (
 // control over the content being decoded or encoded.
 //
 // It's worth noting that although Node offers access into details such as
-// line numbers, colums, and comments, the content when re-encoded will not
+// line numbers, columns, and comments, the content when re-encoded will not
 // have its original textual representation preserved. An effort is made to
-// render the data plesantly, and to preserve comments near the data they
+// render the data pleasantly, and to preserve comments near the data they
 // describe, though.
 //
 // Values that make use of the Node type interact with the yaml package in the
@@ -545,7 +550,7 @@ type Node struct {
 	// scalar nodes may be obtained via the ShortTag and LongTag methods.
 	Kind  Kind
 
-	// Style allows customizing the apperance of the node in the tree.
+	// Style allows customizing the appearance of the node in the tree.
 	Style Style
 
 	// Tag holds the YAML tag defining the data type for the value.
@@ -557,7 +562,7 @@ type Node struct {
 	// the implicit tag diverges from the provided one.
 	Tag string
 
-	// Value holds the unescaped and unquoted represenation of the value.
+	// Value holds the unescaped and unquoted representation of the value.
 	Value string
 
 	// Anchor holds the anchor name for this node, which allows aliases to point to it.
