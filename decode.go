@@ -157,13 +157,10 @@ func (p *parser) parse(triggerHook bool) *Node {
 	case yaml_ALIAS_EVENT:
 		n = p.alias()
 	case yaml_MAPPING_START_EVENT:
-		triggerHook = false // maps are not leaf nodes, skip hook
 		n = p.mapping()
 	case yaml_SEQUENCE_START_EVENT:
-		triggerHook = false // sequences are not leaf nodes, skip hook
 		n = p.sequence()
 	case yaml_DOCUMENT_START_EVENT:
-		triggerHook = false // documents are not leaf nodes, skip hook
 		n =  p.document()
 	case yaml_STREAM_END_EVENT:
 		// Happens when attempting to decode an empty buffer.

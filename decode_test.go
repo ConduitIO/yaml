@@ -1750,12 +1750,23 @@ x:
 	c.Assert(err, IsNil)
 
 	want := map[string]string{
+		"a": "",
 		"a.b": "foo",
+		"a.c": "",
+		"a.c.d": "",
 		"a.c.d.e": "bar",
+		"f": "",
+		"f.g": "",
+		"f.g.h": "",
+		"f.g.h.i": "",
 		"f.g.h.i.0": "1",
 		"f.g.h.i.1": "2",
+		"j": "",
 		"j.k": "true",
 		"j.l": "false",
+		"x": "",
+		"x.0": "",
+		"x.1": "",
 		"x.0.z": "yes",
 		"x.0.y": "no",
 		"x.1.z": "up",
