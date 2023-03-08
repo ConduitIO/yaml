@@ -38,7 +38,7 @@ type parser struct {
 	textless bool
 
 	hook     DecoderHook
-	hookPath []string
+	hookPath []*Node
 }
 
 func newParser(b []byte) *parser {
@@ -72,7 +72,7 @@ func (p *parser) init() {
 	}
 	p.anchors = make(map[string]*Node)
 	p.expect(yaml_STREAM_START_EVENT)
-	p.hookPath = make([]string, 0)
+	p.hookPath = make([]*Node, 0)
 	p.doneInit = true
 }
 
@@ -172,9 +172,47 @@ func (p *parser) parse(triggerHook bool) *Node {
 	}
 
 	if triggerHook && p.hook != nil {
-		p.hook(p.hookPath, n)
+		p.triggerHook(n)
 	}
 	return n
+}
+
+func (p *parser) triggerHook(node *Node) {
+	path := make([]string, 0, len(p.hookPath))
+	for _, n := range p.hookPath {
+		if n.Kind == SequenceNode {
+			// sequence nodes have no value, we use the index of the element instead
+			path = append(path, strconv.Itoa(len(n.Content)))
+		} else {
+			path = append(path, n.Value)
+		}
+	}
+
+	// we want to give the hook its own pointer
+	hookNode := *node
+	if len(p.hookPath) > 0 {
+		if parent := p.hookPath[len(p.hookPath)-1]; parent.Kind != SequenceNode {
+			// Go-yaml represents keys in a map as scalar nodes, which are not
+			// related to the map values in any way. In the decoder hook we
+			// simplify this by exposing the path to the key node and supplying
+			// the corresponding value node that contains the data for that key.
+			// The line and column in the value node point to where the value
+			// starts, which can cause some confusion, as it does not match the
+			// line and column of the key referenced in the path. That's why we
+			// adjust the line and column to match the key node's line and
+			// column. After the hook returns we copy the node back into the
+			// original node so we need to adjust the line and column again to
+			// preserve the original values.
+			oldLine, oldColumn := node.Line, node.Column                // store original line and column
+			hookNode.Line, hookNode.Column = parent.Line, parent.Column // adjust line and column
+			defer func() {
+				node.Line, node.Column = oldLine, oldColumn // restore original line and column
+			}()
+		}
+	}
+
+	p.hook(path, &hookNode)
+	*node = hookNode // overwrite node in case the hook changed it
 }
 
 func (p *parser) node(kind Kind, defaultTag, tag, value string) *Node {
@@ -268,14 +306,14 @@ func (p *parser) sequence() *Node {
 	}
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_SEQUENCE_START_EVENT)
+	p.hookPath = append(p.hookPath, n)
 	for p.peek() != yaml_SEQUENCE_END_EVENT {
-		p.hookPath = append(p.hookPath, strconv.Itoa(len(n.Content)))
 		p.parseChild(n, true)
-		p.hookPath = p.hookPath[:len(p.hookPath)-1]
 	}
 	n.LineComment = string(p.event.line_comment)
 	n.FootComment = string(p.event.foot_comment)
 	p.expect(yaml_SEQUENCE_END_EVENT)
+	p.hookPath = p.hookPath[:len(p.hookPath)-1]
 	return n
 }
 
@@ -290,7 +328,7 @@ func (p *parser) mapping() *Node {
 	p.expect(yaml_MAPPING_START_EVENT)
 	for p.peek() != yaml_MAPPING_END_EVENT {
 		k := p.parseChild(n, false)
-		p.hookPath = append(p.hookPath, k.Value)
+		p.hookPath = append(p.hookPath, k)
 		if block && k.FootComment != "" {
 			// Must be a foot comment for the prior value when being dedented.
 			if len(n.Content) > 2 {
