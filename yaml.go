@@ -495,6 +495,17 @@ func (e *TypeError) Error() string {
 	return b.String()
 }
 
+func (e *TypeError) Unwrap() []error {
+	if len(e.Errors) == 0 {
+		return nil
+	}
+	errs := make([]error, len(e.Errors))
+	for i,err := range e.Errors {
+		errs[i] = err
+	}
+	return errs
+}
+
 type Kind uint32
 
 const (
