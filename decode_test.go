@@ -1725,13 +1725,12 @@ a:
 f:
   g:
     h:
-      i:
-        - 1
-        - 2
+      i: [1,2]
 j: {"k": true, "l": false}
 
 x:
-  - z: yes
+  - z:
+      zz: yes
     y: no
   - z: up
     w: down
@@ -1749,24 +1748,39 @@ x:
 	err := dec.Decode(map[string]interface{}{})
 	c.Assert(err, IsNil)
 
-	want := map[string]string{
-		"a.b": "foo",
-		"a.c.d.e": "bar",
-		"f.g.h.i.0": "1",
-		"f.g.h.i.1": "2",
-		"j.k": "true",
-		"j.l": "false",
-		"x.0.z": "yes",
-		"x.0.y": "no",
-		"x.1.z": "up",
-		"x.1.w": "down",
+	// values represent a slice that contains the expected line, column and value
+	want := map[string][]interface{}{
+		"a":         {2, 1, ""},
+		"a.b":       {3, 3, "foo"},
+		"a.c":       {4, 3, ""},
+		"a.c.d":     {5, 5, ""},
+		"a.c.d.e":   {6, 7, "bar"},
+		"f":         {7, 1, ""},
+		"f.g":       {8, 3, ""},
+		"f.g.h":     {9, 5, ""},
+		"f.g.h.i":   {10, 7, ""},
+		"f.g.h.i.0": {10, 11, "1"},
+		"f.g.h.i.1": {10, 13, "2"},
+		"j":         {11, 1, ""},
+		"j.k":       {11, 5, "true"},
+		"j.l":       {11, 16, "false"},
+		"x":         {13, 1, ""},
+		"x.0":       {14, 5, ""},
+		"x.0.z":     {14, 5, ""},
+		"x.0.z.zz":  {15, 7, "yes"},
+		"x.0.y":     {16, 5, "no"},
+		"x.1":       {17, 5, ""},
+		"x.1.z":     {17, 5, "up"},
+		"x.1.w":     {18, 5, "down"},
 	}
 	c.Assert(len(got), Equals, len(want))
-	for k,v := range want {
+	for k, v := range want {
 		comment := Commentf("key: %s", k)
 		node, ok := got[k]
-		c.Assert(ok, Equals, true, comment)
-		c.Assert(node.Value, Equals, v, comment)
+		c.Check(ok, Equals, true, comment)
+		c.Check(node.Line, Equals, v[0], comment)
+		c.Check(node.Column, Equals, v[1], comment)
+		c.Check(node.Value, Equals, v[2], comment)
 	}
 }
 
