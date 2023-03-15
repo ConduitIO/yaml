@@ -127,11 +127,11 @@ func (dec *Decoder) KnownFields(enable bool) {
 	dec.knownFields = enable
 }
 
-// DecoderHook is called for every leaf node and receives the node itself and
-// the path leading up to the node.
+// DecoderHook is called for every node and receives the node itself and the
+// path leading up to the node.
 type DecoderHook func(path []string, node *Node)
 
-// WithHook adds a DecoderHook that gets called for every leaf node.
+// WithHook adds a DecoderHook that gets called for every node.
 func (dec *Decoder) WithHook(h DecoderHook) {
 	dec.parser.withHook(h)
 }
